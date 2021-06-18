@@ -1,0 +1,43 @@
+{
+  "inbounds": [{
+    "port": 56832,
+    "listen": "127.0.0.1",
+    "protocol": "vmess",
+    "settings": {
+      "clients": [
+        {
+          "id": "a8729b04-d92a-4cd2-8bda-04ca7a0a2750",
+          "level": 1,
+          "alterId": 0
+        }
+      ],
+      "disableInsecureEncryption": false
+    },
+    "streamSettings": {
+        "network": "ws",
+        "wsSettings": {
+            "path": "/ray",
+            "headers": {
+                "Host": "sakaman.xyz"
+            }
+        }
+    }
+  }],
+  "outbounds": [{
+    "protocol": "freedom",
+    "settings": {}
+  },{
+    "protocol": "blackhole",
+    "settings": {},
+    "tag": "blocked"
+  }],
+  "routing": {
+    "rules": [
+      {
+        "type": "field",
+        "ip": ["geoip:private"],
+        "outboundTag": "blocked"
+      }
+    ]
+  }
+}
