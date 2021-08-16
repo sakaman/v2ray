@@ -1,1042 +1,780 @@
 #!/bin/bash
+PATH=/bin:/sbin:/usr/bin:/usr/sbin:/usr/local/bin:/usr/local/sbin:~/bin
+export PATH
+LANG=en_US.UTF-8
 
-red='\e[91m'
-green='\e[92m'
-yellow='\e[93m'
-magenta='\e[95m'
-cyan='\e[96m'
-none='\e[0m'
-_red() { echo -e ${red}$*${none}; }
-_green() { echo -e ${green}$*${none}; }
-_yellow() { echo -e ${yellow}$*${none}; }
-_magenta() { echo -e ${magenta}$*${none}; }
-_cyan() { echo -e ${cyan}$*${none}; }
-
-# Root
-[[ $(id -u) != 0 ]] && echo -e "\n 哎呀……请使用 ${red}root ${none}用户运行 ${yellow}~(^_^) ${none}\n" && exit 1
-
-cmd="apt-get"
-
-sys_bit=$(uname -m)
-
-case $sys_bit in
-i[36]86)
-	v2ray_bit="32"
-	caddy_arch="386"
-	;;
-'amd64' | x86_64)
-	v2ray_bit="64"
-	caddy_arch="amd64"
-	;;
-*armv6*)
-	v2ray_bit="arm32-v6"
-	caddy_arch="arm6"
-	;;
-*armv7*)
-	v2ray_bit="arm32-v7a"
-	caddy_arch="arm7"
-	;;
-*aarch64* | *armv8*)
-	v2ray_bit="arm64-v8a"
-	caddy_arch="arm64"
-	;;
-*)
-	echo -e " 
-	哈哈……这个 ${red}辣鸡脚本${none} 不支持你的系统。 ${yellow}(-_-) ${none}
-
-	备注: 仅支持 Ubuntu 16+ / Debian 8+ / CentOS 7+ 系统
-	" && exit 1
-	;;
-esac
-
-# 笨笨的检测方法
-if [[ $(command -v apt-get) || $(command -v yum) ]] && [[ $(command -v systemctl) ]]; then
-
-	if [[ $(command -v yum) ]]; then
-
-		cmd="yum"
-
-	fi
-
-else
-
-	echo -e " 
-	哈哈……这个 ${red}辣鸡脚本${none} 不支持你的系统。 ${yellow}(-_-) ${none}
-
-	备注: 仅支持 Ubuntu 16+ / Debian 8+ / CentOS 7+ 系统
-	" && exit 1
-
+if [ $(whoami) != "root" ];then
+	echo "请使用root权限执行宝塔安装命令！"
+	exit 1;
 fi
 
-uuid=$(cat /proc/sys/kernel/random/uuid)
-old_id="e55c8d17-2cf3-b21a-bcf1-eeacb011ed79"
-v2ray_server_config="/etc/v2ray/config.json"
-v2ray_client_config="/etc/v2ray/233blog_v2ray_config.json"
-backup="/etc/v2ray/233blog_v2ray_backup.conf"
-_v2ray_sh="/usr/local/sbin/v2ray"
-systemd=true
-# _test=true
+is64bit=$(getconf LONG_BIT)
+if [ "${is64bit}" != '64' ];then
+	Red_Error "抱歉, 当前面板版本不支持32位系统, 请使用64位系统或安装宝塔5.9!";
+fi
 
-transport=(
-	TCP
-	TCP_HTTP
-	WebSocket
-	"WebSocket + TLS"
-	HTTP/2
-	mKCP
-	mKCP_utp
-	mKCP_srtp
-	mKCP_wechat-video
-	mKCP_dtls
-	mKCP_wireguard
-	QUIC
-	QUIC_utp
-	QUIC_srtp
-	QUIC_wechat-video
-	QUIC_dtls
-	QUIC_wireguard
-	TCP_dynamicPort
-	TCP_HTTP_dynamicPort
-	WebSocket_dynamicPort
-	mKCP_dynamicPort
-	mKCP_utp_dynamicPort
-	mKCP_srtp_dynamicPort
-	mKCP_wechat-video_dynamicPort
-	mKCP_dtls_dynamicPort
-	mKCP_wireguard_dynamicPort
-	QUIC_dynamicPort
-	QUIC_utp_dynamicPort
-	QUIC_srtp_dynamicPort
-	QUIC_wechat-video_dynamicPort
-	QUIC_dtls_dynamicPort
-	QUIC_wireguard_dynamicPort
-	VLESS_WebSocket_TLS
-)
+cd ~
+setup_path="/www"
+python_bin=$setup_path/server/panel/pyenv/bin/python
+cpu_cpunt=$(cat /proc/cpuinfo|grep processor|wc -l)
 
-ciphers=(
-	aes-128-gcm
-	aes-256-gcm
-	chacha20-ietf-poly1305
-)
+if [ "$1" ];then
+	IDC_CODE=$1
+fi
 
-_load() {
-	local _dir="/etc/v2ray/233boy/v2ray/src/"
-	. "${_dir}$@"
-}
-_sys_timezone() {
-	IS_OPENVZ=
-	if hostnamectl status | grep -q openvz; then
-		IS_OPENVZ=1
+GetSysInfo(){
+	if [ -s "/etc/redhat-release" ];then
+		SYS_VERSION=$(cat /etc/redhat-release)
+	elif [ -s "/etc/issue" ]; then
+		SYS_VERSION=$(cat /etc/issue)
 	fi
+	SYS_INFO=$(uname -a)
+	SYS_BIT=$(getconf LONG_BIT)
+	MEM_TOTAL=$(free -m|grep Mem|awk '{print $2}')
+	CPU_INFO=$(getconf _NPROCESSORS_ONLN)
 
-	echo
-	timedatectl set-timezone Asia/Shanghai
-	timedatectl set-ntp true
-	echo "已将你的主机设置为Asia/Shanghai时区并通过systemd-timesyncd自动同步时间。"
-	echo
-
-	if [[ $IS_OPENVZ ]]; then
-		echo
-		echo -e "你的主机环境为 ${yellow}Openvz${none} ，建议使用${yellow}v2ray mkcp${none}系列协议。"
-		echo -e "注意：${yellow}Openvz${none} 系统时间无法由虚拟机内程序控制同步。"
-		echo -e "如果主机时间跟实际相差${yellow}超过90秒${none}，v2ray将无法正常通信，请发ticket联系vps主机商调整。"
+	echo -e ${SYS_VERSION}
+	echo -e Bit:${SYS_BIT} Mem:${MEM_TOTAL}M Core:${CPU_INFO}
+	echo -e ${SYS_INFO}
+	echo -e "请截图以上报错信息发帖至论坛www.bt.cn/bbs求助"
+}
+Red_Error(){
+	echo '=================================================';
+	printf '\033[1;31;40m%b\033[0m\n' "$1";
+	GetSysInfo
+	exit 1;
+}
+Lock_Clear(){
+	if [ -f "/etc/bt_crack.pl" ];then
+		chattr -R -ia /www
+		chattr -ia /etc/init.d/bt
+		\cp -rpa /www/backup/panel/vhost/* /www/server/panel/vhost/
+		mv /www/server/panel/BTPanel/__init__.bak /www/server/panel/BTPanel/__init__.py
+		rm -f /etc/bt_crack.pl
 	fi
 }
-
-_sys_time() {
-	echo -e "\n主机时间：${yellow}"
-	timedatectl status | sed -n '1p;4p'
-	echo -e "${none}"
-	[[ $IS_OPENV ]] && pause
-}
-v2ray_config() {
-	# clear
-	echo
-	while :; do
-		echo -e "请选择 "$yellow"V2Ray"$none" 传输协议 [${magenta}1-${#transport[*]}$none]"
-		echo
-		for ((i = 1; i <= ${#transport[*]}; i++)); do
-			Stream="${transport[$i - 1]}"
-			if [[ "$i" -le 9 ]]; then
-				# echo
-				echo -e "$yellow  $i. $none${Stream}"
-			else
-				# echo
-				echo -e "$yellow $i. $none${Stream}"
-			fi
-		done
-		echo
-		echo "备注1: 含有 [dynamicPort] 的即启用动态端口.."
-		echo "备注2: [utp | srtp | wechat-video | dtls | wireguard] 分别伪装成 [BT下载 | 视频通话 | 微信视频通话 | DTLS 1.2 数据包 | WireGuard 数据包]"
-		echo
-		read -p "$(echo -e "(默认协议: ${cyan}TCP$none)"):" v2ray_transport
-		[ -z "$v2ray_transport" ] && v2ray_transport=1
-		case $v2ray_transport in
-		[1-9] | [1-2][0-9] | 3[0-3])
-			echo
-			echo
-			echo -e "$yellow V2Ray 传输协议 = $cyan${transport[$v2ray_transport - 1]}$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		*)
-			error
-			;;
-		esac
-	done
-	v2ray_port_config
-}
-v2ray_port_config() {
-	case $v2ray_transport in
-	4 | 5 | 33)
-		tls_config
-		;;
-	*)
-		local random=$(shuf -i20001-65535 -n1)
-		while :; do
-			echo -e "请输入 "$yellow"V2Ray"$none" 端口 ["$magenta"1-65535"$none"]"
-			read -p "$(echo -e "(默认端口: ${cyan}${random}$none):")" v2ray_port
-			[ -z "$v2ray_port" ] && v2ray_port=$random
-			case $v2ray_port in
-			[1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9] | [1-5][0-9][0-9][0-9][0-9] | 6[0-4][0-9][0-9][0-9] | 65[0-4][0-9][0-9] | 655[0-3][0-5])
-				echo
-				echo
-				echo -e "$yellow V2Ray 端口 = $cyan$v2ray_port$none"
-				echo "----------------------------------------------------------------"
-				echo
-				break
-				;;
-			*)
-				error
-				;;
-			esac
-		done
-		if [[ $v2ray_transport -ge 18 && $v2ray_transport -ne 33 ]]; then
-			v2ray_dynamic_port_start
-		fi
-		;;
-	esac
-}
-
-v2ray_dynamic_port_start() {
-
-	while :; do
-		echo -e "请输入 "$yellow"V2Ray 动态端口开始 "$none"范围 ["$magenta"1-65535"$none"]"
-		read -p "$(echo -e "(默认开始端口: ${cyan}10000$none):")" v2ray_dynamic_port_start_input
-		[ -z $v2ray_dynamic_port_start_input ] && v2ray_dynamic_port_start_input=10000
-		case $v2ray_dynamic_port_start_input in
-		$v2ray_port)
-			echo
-			echo " 不能和 V2Ray 端口一毛一样...."
-			echo
-			echo -e " 当前 V2Ray 端口：${cyan}$v2ray_port${none}"
-			error
-			;;
-		[1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9] | [1-5][0-9][0-9][0-9][0-9] | 6[0-4][0-9][0-9][0-9] | 65[0-4][0-9][0-9] | 655[0-3][0-5])
-			echo
-			echo
-			echo -e "$yellow V2Ray 动态端口开始 = $cyan$v2ray_dynamic_port_start_input$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		*)
-			error
-			;;
-		esac
-
-	done
-
-	if [[ $v2ray_dynamic_port_start_input -lt $v2ray_port ]]; then
-		lt_v2ray_port=true
+Install_Check(){
+	if [ "${INSTALL_FORCE}" ];then
+		return
 	fi
-
-	v2ray_dynamic_port_end
-}
-v2ray_dynamic_port_end() {
-
-	while :; do
-		echo -e "请输入 "$yellow"V2Ray 动态端口结束 "$none"范围 ["$magenta"1-65535"$none"]"
-		read -p "$(echo -e "(默认结束端口: ${cyan}20000$none):")" v2ray_dynamic_port_end_input
-		[ -z $v2ray_dynamic_port_end_input ] && v2ray_dynamic_port_end_input=20000
-		case $v2ray_dynamic_port_end_input in
-		[1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9] | [1-5][0-9][0-9][0-9][0-9] | 6[0-4][0-9][0-9][0-9] | 65[0-4][0-9][0-9] | 655[0-3][0-5])
-
-			if [[ $v2ray_dynamic_port_end_input -le $v2ray_dynamic_port_start_input ]]; then
-				echo
-				echo " 不能小于或等于 V2Ray 动态端口开始范围"
-				echo
-				echo -e " 当前 V2Ray 动态端口开始：${cyan}$v2ray_dynamic_port_start_input${none}"
-				error
-			elif [ $lt_v2ray_port ] && [[ ${v2ray_dynamic_port_end_input} -ge $v2ray_port ]]; then
-				echo
-				echo " V2Ray 动态端口结束范围 不能包括 V2Ray 端口..."
-				echo
-				echo -e " 当前 V2Ray 端口：${cyan}$v2ray_port${none}"
-				error
-			else
-				echo
-				echo
-				echo -e "$yellow V2Ray 动态端口结束 = $cyan$v2ray_dynamic_port_end_input$none"
-				echo "----------------------------------------------------------------"
-				echo
-				break
-			fi
-			;;
-		*)
-			error
-			;;
-		esac
-
-	done
-
-}
-
-tls_config() {
-
-	echo
-	local random=$(shuf -i20001-65535 -n1)
-	while :; do
-		echo -e "请输入 "$yellow"V2Ray"$none" 端口 ["$magenta"1-65535"$none"]，不能选择 "$magenta"80"$none" 或 "$magenta"443"$none" 端口"
-		read -p "$(echo -e "(默认端口: ${cyan}${random}$none):")" v2ray_port
-		[ -z "$v2ray_port" ] && v2ray_port=$random
-		case $v2ray_port in
-		80)
-			echo
-			echo " ...都说了不能选择 80 端口了咯....."
-			error
-			;;
-		443)
-			echo
-			echo " ..都说了不能选择 443 端口了咯....."
-			error
-			;;
-		[1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9] | [1-5][0-9][0-9][0-9][0-9] | 6[0-4][0-9][0-9][0-9] | 65[0-4][0-9][0-9] | 655[0-3][0-5])
-			echo
-			echo
-			echo -e "$yellow V2Ray 端口 = $cyan$v2ray_port$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		*)
-			error
-			;;
-		esac
-	done
-
-	while :; do
-		echo
-		echo -e "请输入一个 ${magenta}正确的域名${none}，一定一定一定要正确，不！能！出！错！"
-		read -p "(例如：233blog.com): " domain
-		[ -z "$domain" ] && error && continue
-		echo
-		echo
-		echo -e "$yellow 你的域名 = $cyan$domain$none"
-		echo "----------------------------------------------------------------"
-		break
-	done
-	get_ip
-	echo
-	echo
-	echo -e "$yellow 请将 $magenta$domain$none $yellow 解析到: $cyan$ip$none"
-	echo
-	echo -e "$yellow 请将 $magenta$domain$none $yellow 解析到: $cyan$ip$none"
-	echo
-	echo -e "$yellow 请将 $magenta$domain$none $yellow 解析到: $cyan$ip$none"
-	echo "----------------------------------------------------------------"
-	echo
-
-	while :; do
-
-		read -p "$(echo -e "(是否已经正确解析: [${magenta}Y$none]):") " record
-		if [[ -z "$record" ]]; then
-			error
-		else
-			if [[ "$record" == [Yy] ]]; then
-				domain_check
-				echo
-				echo
-				echo -e "$yellow 域名解析 = ${cyan}我确定已经有解析了$none"
-				echo "----------------------------------------------------------------"
-				echo
-				break
-			else
-				error
-			fi
-		fi
-
-	done
-
-	if [[ $v2ray_transport -eq 4 ]]; then
-		auto_tls_config
-	else
-		caddy=true
-		install_caddy_info="打开"
+	echo -e "----------------------------------------------------"
+	echo -e "检查已有其他Web/mysql环境，安装宝塔可能影响现有站点及数据"
+	echo -e "Web/mysql service is alreday installed,Can't install panel"
+	echo -e "----------------------------------------------------"
+	echo -e "已知风险/Enter yes to force installation"
+	read -p "输入yes强制安装: " yes;
+	if [ "$yes" != "yes" ];then
+		echo -e "------------"
+		echo "取消安装"
+		exit;
 	fi
-
-	if [[ $caddy ]]; then
-		path_config_ask
+	INSTALL_FORCE="true"
+}
+System_Check(){
+	MYSQLD_CHECK=$(ps -ef |grep mysqld|grep -v grep|grep -v /www/server/mysql)
+	PHP_CHECK=$(ps -ef|grep php-fpm|grep master|grep -v /www/server/php)
+	NGINX_CHECK=$(ps -ef|grep nginx|grep master|grep -v /www/server/nginx)
+	HTTPD_CHECK=$(ps -ef |grep -E 'httpd|apache'|grep -v /www/server/apache|grep -v grep)
+	if [ "${PHP_CHECK}" ] || [ "${MYSQLD_CHECK}" ] || [ "${NGINX_CHECK}" ] || [ "${HTTPD_CHECK}" ];then
+		Install_Check
 	fi
 }
-auto_tls_config() {
-	echo -e "
-
-		安装 Caddy 来实现 自动配置 TLS
-		
-		如果你已经安装 Nginx 或 Caddy
-
-		$yellow并且..自己能搞定配置 TLS$none
-
-		那么就不需要 打开自动配置 TLS
-		"
-	echo "----------------------------------------------------------------"
-	echo
-
-	while :; do
-
-		read -p "$(echo -e "(是否自动配置 TLS: [${magenta}Y/N$none]):") " auto_install_caddy
-		if [[ -z "$auto_install_caddy" ]]; then
-			error
-		else
-			if [[ "$auto_install_caddy" == [Yy] ]]; then
-				caddy=true
-				install_caddy_info="打开"
-				echo
-				echo
-				echo -e "$yellow 自动配置 TLS = $cyan$install_caddy_info$none"
-				echo "----------------------------------------------------------------"
-				echo
-				break
-			elif [[ "$auto_install_caddy" == [Nn] ]]; then
-				install_caddy_info="关闭"
-				echo
-				echo
-				echo -e "$yellow 自动配置 TLS = $cyan$install_caddy_info$none"
-				echo "----------------------------------------------------------------"
-				echo
-				break
-			else
-				error
-			fi
-		fi
-
-	done
-}
-path_config_ask() {
-	echo
-	while :; do
-		echo -e "是否开启 网站伪装 和 路径分流 [${magenta}Y/N$none]"
-		read -p "$(echo -e "(默认: [${cyan}N$none]):")" path_ask
-		[[ -z $path_ask ]] && path_ask="n"
-
-		case $path_ask in
-		Y | y)
-			path_config
-			break
-			;;
-		N | n)
-			echo
-			echo
-			echo -e "$yellow 网站伪装 和 路径分流 = $cyan 不想配置 $none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		*)
-			error
-			;;
-		esac
-	done
-}
-path_config() {
-	echo
-	while :; do
-		echo -e "请输入想要 ${magenta} 用来分流的路径 $none , 例如 /233blog , 那么只需要输入 233blog 即可"
-		read -p "$(echo -e "(默认: [${cyan}233blog$none]):")" path
-		[[ -z $path ]] && path="233blog"
-
-		case $path in
-		*[/$]*)
-			echo
-			echo -e " 由于这个脚本太辣鸡了..所以分流的路径不能包含$red / $none或$red $ $none这两个符号.... "
-			echo
-			error
-			;;
-		*)
-			echo
-			echo
-			echo -e "$yellow 分流的路径 = ${cyan}/${path}$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		esac
-	done
-	is_path=true
-	proxy_site_config
-}
-proxy_site_config() {
-	echo
-	while :; do
-		echo -e "请输入 ${magenta}一个正确的 $none ${cyan}网址$none 用来作为 ${cyan}网站的伪装$none , 例如 https://liyafly.com"
-		echo -e "举例...你当前的域名是 $green$domain$none , 伪装的网址的是 https://liyafly.com"
-		echo -e "然后打开你的域名时候...显示出来的内容就是来自 https://liyafly.com 的内容"
-		echo -e "其实就是一个反代...明白就好..."
-		echo -e "如果不能伪装成功...可以使用 v2ray config 修改伪装的网址"
-		read -p "$(echo -e "(默认: [${cyan}https://liyafly.com$none]):")" proxy_site
-		[[ -z $proxy_site ]] && proxy_site="https://liyafly.com"
-
-		case $proxy_site in
-		*[#$]*)
-			echo
-			echo -e " 由于这个脚本太辣鸡了..所以伪装的网址不能包含$red # $none或$red $ $none这两个符号.... "
-			echo
-			error
-			;;
-		*)
-			echo
-			echo
-			echo -e "$yellow 伪装的网址 = ${cyan}${proxy_site}$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		esac
-	done
-}
-
-blocked_hosts() {
-	echo
-	while :; do
-		echo -e "是否开启广告拦截(会影响性能) [${magenta}Y/N$none]"
-		read -p "$(echo -e "(默认 [${cyan}N$none]):")" blocked_ad
-		[[ -z $blocked_ad ]] && blocked_ad="n"
-
-		case $blocked_ad in
-		Y | y)
-			blocked_ad_info="开启"
-			ban_ad=true
-			echo
-			echo
-			echo -e "$yellow 广告拦截 = $cyan开启$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		N | n)
-			blocked_ad_info="关闭"
-			echo
-			echo
-			echo -e "$yellow 广告拦截 = $cyan 关闭 $none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		*)
-			error
-			;;
-		esac
-	done
-}
-shadowsocks_config() {
-
-	echo
-
-	while :; do
-		echo -e "是否配置 ${yellow}Shadowsocks${none} [${magenta}Y/N$none]"
-		read -p "$(echo -e "(默认 [${cyan}N$none]):") " install_shadowsocks
-		[[ -z "$install_shadowsocks" ]] && install_shadowsocks="n"
-		if [[ "$install_shadowsocks" == [Yy] ]]; then
-			echo
-			shadowsocks=true
-			shadowsocks_port_config
-			break
-		elif [[ "$install_shadowsocks" == [Nn] ]]; then
-			break
-		else
-			error
-		fi
-
-	done
-
-}
-
-shadowsocks_port_config() {
-	local random=$(shuf -i20001-65535 -n1)
-	while :; do
-		echo -e "请输入 "$yellow"Shadowsocks"$none" 端口 ["$magenta"1-65535"$none"]，不能和 "$yellow"V2Ray"$none" 端口相同"
-		read -p "$(echo -e "(默认端口: ${cyan}${random}$none):") " ssport
-		[ -z "$ssport" ] && ssport=$random
-		case $ssport in
-		$v2ray_port)
-			echo
-			echo " 不能和 V2Ray 端口一毛一样...."
-			error
-			;;
-		[1-9] | [1-9][0-9] | [1-9][0-9][0-9] | [1-9][0-9][0-9][0-9] | [1-5][0-9][0-9][0-9][0-9] | 6[0-4][0-9][0-9][0-9] | 65[0-4][0-9][0-9] | 655[0-3][0-5])
-			if [[ $v2ray_transport == [45] ]]; then
-				local tls=ture
-			fi
-			if [[ $tls && $ssport == "80" ]] || [[ $tls && $ssport == "443" ]]; then
-				echo
-				echo -e "由于你已选择了 "$green"WebSocket + TLS $none或$green HTTP/2"$none" 传输协议."
-				echo
-				echo -e "所以不能选择 "$magenta"80"$none" 或 "$magenta"443"$none" 端口"
-				error
-			elif [[ $v2ray_dynamic_port_start_input == $ssport || $v2ray_dynamic_port_end_input == $ssport ]]; then
-				local multi_port="${v2ray_dynamic_port_start_input} - ${v2ray_dynamic_port_end_input}"
-				echo
-				echo " 抱歉，此端口和 V2Ray 动态端口 冲突，当前 V2Ray 动态端口范围为：$multi_port"
-				error
-			elif [[ $v2ray_dynamic_port_start_input -lt $ssport && $ssport -le $v2ray_dynamic_port_end_input ]]; then
-				local multi_port="${v2ray_dynamic_port_start_input} - ${v2ray_dynamic_port_end_input}"
-				echo
-				echo " 抱歉，此端口和 V2Ray 动态端口 冲突，当前 V2Ray 动态端口范围为：$multi_port"
-				error
-			else
-				echo
-				echo
-				echo -e "$yellow Shadowsocks 端口 = $cyan$ssport$none"
-				echo "----------------------------------------------------------------"
-				echo
-				break
-			fi
-			;;
-		*)
-			error
-			;;
-		esac
-
-	done
-
-	shadowsocks_password_config
-}
-shadowsocks_password_config() {
-
-	while :; do
-		echo -e "请输入 "$yellow"Shadowsocks"$none" 密码"
-		read -p "$(echo -e "(默认密码: ${cyan}233blog.com$none)"): " sspass
-		[ -z "$sspass" ] && sspass="233blog.com"
-		case $sspass in
-		*[/$]*)
-			echo
-			echo -e " 由于这个脚本太辣鸡了..所以密码不能包含$red / $none或$red $ $none这两个符号.... "
-			echo
-			error
-			;;
-		*)
-			echo
-			echo
-			echo -e "$yellow Shadowsocks 密码 = $cyan$sspass$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		esac
-
-	done
-
-	shadowsocks_ciphers_config
-}
-shadowsocks_ciphers_config() {
-
-	while :; do
-		echo -e "请选择 "$yellow"Shadowsocks"$none" 加密协议 [${magenta}1-${#ciphers[*]}$none]"
-		for ((i = 1; i <= ${#ciphers[*]}; i++)); do
-			ciphers_show="${ciphers[$i - 1]}"
-			echo
-			echo -e "$yellow $i. $none${ciphers_show}"
-		done
-		echo
-		read -p "$(echo -e "(默认加密协议: ${cyan}${ciphers[1]}$none)"):" ssciphers_opt
-		[ -z "$ssciphers_opt" ] && ssciphers_opt=2
-		case $ssciphers_opt in
-		[1-3])
-			ssciphers=${ciphers[$ssciphers_opt - 1]}
-			echo
-			echo
-			echo -e "$yellow Shadowsocks 加密协议 = $cyan${ssciphers}$none"
-			echo "----------------------------------------------------------------"
-			echo
-			break
-			;;
-		*)
-			error
-			;;
-		esac
-
-	done
-	pause
-}
-
-install_info() {
-	clear
-	echo
-	echo " ....准备安装了咯..看看有毛有配置正确了..."
-	echo
-	echo "---------- 安装信息 -------------"
-	echo
-	echo -e "$yellow V2Ray 传输协议 = $cyan${transport[$v2ray_transport - 1]}$none"
-
-	if [[ $v2ray_transport == [45] || $v2ray_transport == 33 ]]; then
-		echo
-		echo -e "$yellow V2Ray 端口 = $cyan$v2ray_port$none"
-		echo
-		echo -e "$yellow 你的域名 = $cyan$domain$none"
-		echo
-		echo -e "$yellow 域名解析 = ${cyan}我确定已经有解析了$none"
-		echo
-		echo -e "$yellow 自动配置 TLS = $cyan$install_caddy_info$none"
-
-		if [[ $ban_ad ]]; then
-			echo
-			echo -e "$yellow 广告拦截 = $cyan$blocked_ad_info$none"
-		fi
-		if [[ $is_path ]]; then
-			echo
-			echo -e "$yellow 路径分流 = ${cyan}/${path}$none"
-		fi
-	elif [[ $v2ray_transport -ge 18 && $v2ray_transport -ne 33 ]]; then
-		echo
-		echo -e "$yellow V2Ray 端口 = $cyan$v2ray_port$none"
-		echo
-		echo -e "$yellow V2Ray 动态端口范围 = $cyan${v2ray_dynamic_port_start_input} - ${v2ray_dynamic_port_end_input}$none"
-
-		if [[ $ban_ad ]]; then
-			echo
-			echo -e "$yellow 广告拦截 = $cyan$blocked_ad_info$none"
-		fi
-	else
-		echo
-		echo -e "$yellow V2Ray 端口 = $cyan$v2ray_port$none"
-
-		if [[ $ban_ad ]]; then
-			echo
-			echo -e "$yellow 广告拦截 = $cyan$blocked_ad_info$none"
-		fi
-	fi
-	if [ $shadowsocks ]; then
-		echo
-		echo -e "$yellow Shadowsocks 端口 = $cyan$ssport$none"
-		echo
-		echo -e "$yellow Shadowsocks 密码 = $cyan$sspass$none"
-		echo
-		echo -e "$yellow Shadowsocks 加密协议 = $cyan${ssciphers}$none"
-	else
-		echo
-		echo -e "$yellow 是否配置 Shadowsocks = ${cyan}未配置${none}"
-	fi
-	echo
-	echo "---------- END -------------"
-	echo
-	pause
-	echo
-}
-
-domain_check() {
-	# if [[ $cmd == "yum" ]]; then
-	# 	yum install bind-utils -y
-	# else
-	# 	$cmd install dnsutils -y
-	# fi
-	# test_domain=$(dig $domain +short)
-	# test_domain=$(ping $domain -c 1 -4 | grep -oE -m1 "([0-9]{1,3}\.){3}[0-9]{1,3}")
-	# test_domain=$(wget -qO- --header='accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=$domain&type=A" | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}" | head -1)
-	test_domain=$(curl -sH 'accept: application/dns-json' "https://cloudflare-dns.com/dns-query?name=$domain&type=A" | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}" | head -1)
-	if [[ $test_domain != $ip ]]; then
-		echo
-		echo -e "$red 检测域名解析错误....$none"
-		echo
-		echo -e " 你的域名: $yellow$domain$none 未解析到: $cyan$ip$none"
-		echo
-		echo -e " 你的域名当前解析到: $cyan$test_domain$none"
-		echo
-		echo "备注...如果你的域名是使用 Cloudflare 解析的话..在 Status 那里点一下那图标..让它变灰"
-		echo
-		exit 1
+Get_Pack_Manager(){
+	if [ -f "/usr/bin/yum" ] && [ -d "/etc/yum.repos.d" ]; then
+		PM="yum"
+	elif [ -f "/usr/bin/apt-get" ] && [ -f "/usr/bin/dpkg" ]; then
+		PM="apt-get"		
 	fi
 }
-
-install_caddy() {
-	# download caddy file then install
-	_load download-caddy.sh
-	_download_caddy_file
-	_install_caddy_service
-	caddy_config
-
-}
-caddy_config() {
-	# local email=$(shuf -i1-10000000000 -n1)
-	_load caddy-config.sh
-
-	# systemctl restart caddy
-	do_service restart caddy
-}
-
-install_v2ray() {
-	$cmd update -y
-	if [[ $cmd == "apt-get" ]]; then
-		$cmd install -y lrzsz git zip unzip curl wget qrencode libcap2-bin dbus
-	else
-		# $cmd install -y lrzsz git zip unzip curl wget qrencode libcap iptables-services
-		$cmd install -y lrzsz git zip unzip curl wget qrencode libcap
+Auto_Swap()
+{
+	swap=$(free |grep Swap|awk '{print $2}')
+	if [ "${swap}" -gt 1 ];then
+		echo "Swap total sizse: $swap";
+		return;
 	fi
-	ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
-	[ -d /etc/v2ray ] && rm -rf /etc/v2ray
-	# date -s "$(curl -sI g.cn | grep Date | cut -d' ' -f3-6)Z"
-	_sys_timezone
-	_sys_time
-
-	if [[ $local_install ]]; then
-		if [[ ! -d $(pwd)/config ]]; then
-			echo
-			echo -e "$red 哎呀呀...安装失败了咯...$none"
-			echo
-			echo -e " 请确保你有完整的上传 233v2.com 的 V2Ray 一键安装脚本 & 管理脚本到当前 ${green}$(pwd) $none目录下"
-			echo
-			exit 1
-		fi
-		mkdir -p /etc/v2ray/233boy/v2ray
-		cp -rf $(pwd)/* /etc/v2ray/233boy/v2ray
-	else
-		pushd /tmp
-		git clone https://github.com/233boy/v2ray -b "$_gitbranch" /etc/v2ray/233boy/v2ray --depth=1
-		popd
-
+	if [ ! -d /www ];then
+		mkdir /www
 	fi
-
-	if [[ ! -d /etc/v2ray/233boy/v2ray ]]; then
-		echo
-		echo -e "$red 哎呀呀...克隆脚本仓库出错了...$none"
-		echo
-		echo -e " 温馨提示..... 请尝试自行安装 Git: ${green}$cmd install -y git $none 之后再安装此脚本"
-		echo
-		exit 1
+	swapFile="/www/swap"
+	dd if=/dev/zero of=$swapFile bs=1M count=1025
+	mkswap -f $swapFile
+	swapon $swapFile
+	echo "$swapFile    swap    swap    defaults    0 0" >> /etc/fstab
+	swap=`free |grep Swap|awk '{print $2}'`
+	if [ $swap -gt 1 ];then
+		echo "Swap total sizse: $swap";
+		return;
 	fi
-
-	# download v2ray file then install
-	_load download-v2ray.sh
-	_download_v2ray_file
-	_install_v2ray_service
-	_mkdir_dir
-}
-
-config() {
-	cp -f /etc/v2ray/233boy/v2ray/config/backup.conf $backup
-	cp -f /etc/v2ray/233boy/v2ray/v2ray.sh $_v2ray_sh
-	chmod +x $_v2ray_sh
-
-	v2ray_id=$uuid
-	alterId=0
-	ban_bt=true
-	if [[ $v2ray_transport -ge 18 && $v2ray_transport -ne 33 ]]; then
-		v2ray_dynamicPort_start=${v2ray_dynamic_port_start_input}
-		v2ray_dynamicPort_end=${v2ray_dynamic_port_end_input}
-	fi
-	_load config.sh
-
-	# if [[ $cmd == "apt-get" ]]; then
-	# 	cat >/etc/network/if-pre-up.d/iptables <<-EOF
-	# 		#!/bin/sh
-	# 		/sbin/iptables-restore < /etc/iptables.rules.v4
-	# 		/sbin/ip6tables-restore < /etc/iptables.rules.v6
-	# 	EOF
-	# 	chmod +x /etc/network/if-pre-up.d/iptables
-	# 	# else
-	# 	# 	[ $(pgrep "firewall") ] && systemctl stop firewalld
-	# 	# 	systemctl mask firewalld
-	# 	# 	systemctl disable firewalld
-	# 	# 	systemctl enable iptables
-	# 	# 	systemctl enable ip6tables
-	# 	# 	systemctl start iptables
-	# 	# 	systemctl start ip6tables
-	# fi
 	
-	# systemctl restart v2ray
-	do_service restart v2ray
-	backup_config
-
+	sed -i "/\/www\/swap/d" /etc/fstab
+	rm -f $swapFile
+}
+Service_Add(){
+	if [ "${PM}" == "yum" ] || [ "${PM}" == "dnf" ]; then
+		chkconfig --add bt
+		chkconfig --level 2345 bt on
+	elif [ "${PM}" == "apt-get" ]; then
+		update-rc.d bt defaults
+	fi 
 }
 
-backup_config() {
-	sed -i "18s/=1/=$v2ray_transport/; 21s/=2333/=$v2ray_port/; 24s/=$old_id/=$uuid/" $backup
-	if [[ $v2ray_transport -ge 18 && $v2ray_transport -ne 33 ]]; then
-		sed -i "30s/=10000/=$v2ray_dynamic_port_start_input/; 33s/=20000/=$v2ray_dynamic_port_end_input/" $backup
-	fi
-	if [[ $shadowsocks ]]; then
-		sed -i "42s/=/=true/; 45s/=6666/=$ssport/; 48s/=233blog.com/=$sspass/; 51s/=chacha20-ietf/=$ssciphers/" $backup
-	fi
-	[[ $v2ray_transport == [45] || $v2ray_transport == 33 ]] && sed -i "36s/=233blog.com/=$domain/" $backup
-	[[ $caddy ]] && sed -i "39s/=/=true/" $backup
-	[[ $ban_ad ]] && sed -i "54s/=/=true/" $backup
-	if [[ $is_path ]]; then
-		sed -i "57s/=/=true/; 60s/=233blog/=$path/" $backup
-		sed -i "63s#=https://liyafly.com#=$proxy_site#" $backup
-	fi
-}
-
-get_ip() {
-	ip=$(curl -s https://ipinfo.io/ip)
-	[[ -z $ip ]] && ip=$(curl -s https://api.ip.sb/ip)
-	[[ -z $ip ]] && ip=$(curl -s https://api.ipify.org)
-	[[ -z $ip ]] && ip=$(curl -s https://ip.seeip.org)
-	[[ -z $ip ]] && ip=$(curl -s https://ifconfig.co/ip)
-	[[ -z $ip ]] && ip=$(curl -s https://api.myip.com | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}")
-	[[ -z $ip ]] && ip=$(curl -s icanhazip.com)
-	[[ -z $ip ]] && ip=$(curl -s myip.ipip.net | grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}")
-	[[ -z $ip ]] && echo -e "\n$red 这垃圾小鸡扔了吧！$none\n" && exit
-}
-
-error() {
-
-	echo -e "\n$red 输入错误！$none\n"
-
-}
-
-pause() {
-
-	read -rsp "$(echo -e "按 $green Enter 回车键 $none 继续....或按 $red Ctrl + C $none 取消.")" -d $'\n'
-	echo
-}
-do_service() {
-	if [[ $systemd ]]; then
-		systemctl $1 $2
-	else
-		service $2 $1
-	fi
-}
-show_config_info() {
-	clear
-	_load v2ray-info.sh
-	_v2_args
-	_v2_info
-	_load ss-info.sh
-
-}
-
-install() {
-	if [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f $backup && -d /etc/v2ray/233boy/v2ray ]]; then
-		echo
-		echo " 大佬...你已经安装 V2Ray 啦...无需重新安装"
-		echo
-		echo -e " $yellow输入 ${cyan}v2ray${none} $yellow即可管理 V2Ray${none}"
-		echo
-		exit 1
-	elif [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f /etc/v2ray/233blog_v2ray_backup.txt && -d /etc/v2ray/233boy/v2ray ]]; then
-		echo
-		echo "  如果你需要继续安装.. 请先卸载旧版本"
-		echo
-		echo -e " $yellow输入 ${cyan}v2ray uninstall${none} $yellow即可卸载${none}"
-		echo
-		exit 1
-	fi
-	v2ray_config
-	blocked_hosts
-	shadowsocks_config
-	install_info
-	# [[ $caddy ]] && domain_check
-	install_v2ray
-	if [[ $caddy || $v2ray_port == "80" ]]; then
-		if [[ $cmd == "yum" ]]; then
-			[[ $(pgrep "httpd") ]] && systemctl stop httpd
-			[[ $(command -v httpd) ]] && yum remove httpd -y
-		else
-			[[ $(pgrep "apache2") ]] && service apache2 stop
-			[[ $(command -v apache2) ]] && apt-get remove apache2* -y
+get_node_url(){
+	if [ ! -f /bin/curl ];then
+		if [ "${PM}" = "yum" ]; then
+			yum install curl -y
+		elif [ "${PM}" = "apt-get" ]; then
+			apt-get install curl -y
 		fi
 	fi
-	[[ $caddy ]] && install_caddy
+	
+	echo '---------------------------------------------';
+	echo "Selected download node...";
+	nodes=(http://dg2.bt.cn http://dg1.bt.cn http://180.101.160.68:5880 http://103.224.251.67 http://45.76.53.20 http://120.206.184.160 http://113.107.111.78 http://128.1.164.196);
+	tmp_file1=/dev/shm/net_test1.pl
+	tmp_file2=/dev/shm/net_test2.pl
+	[ -f "${tmp_file1}" ] && rm -f ${tmp_file1}
+	[ -f "${tmp_file2}" ] && rm -f ${tmp_file2}
+	touch $tmp_file1
+	touch $tmp_file2
+	for node in ${nodes[@]};
+	do
+		NODE_CHECK=$(curl --connect-timeout 3 -m 3 2>/dev/null -w "%{http_code} %{time_total}" ${node}/net_test|xargs)
+		RES=$(echo ${NODE_CHECK}|awk '{print $1}')
+		NODE_STATUS=$(echo ${NODE_CHECK}|awk '{print $2}')
+		TIME_TOTAL=$(echo ${NODE_CHECK}|awk '{print $3 * 1000 - 500 }'|cut -d '.' -f 1)
+		if [ "${NODE_STATUS}" == "200" ];then
+			if [ $TIME_TOTAL -lt 100 ];then
+				if [ $RES -ge 1500 ];then
+					echo "$RES $node" >> $tmp_file1
+				fi
+			else
+				if [ $RES -ge 1500 ];then
+					echo "$TIME_TOTAL $node" >> $tmp_file2
+				fi
+			fi
 
-	## bbr
-	_load bbr.sh
-	_try_enable_bbr
-
-	get_ip
-	config
-	show_config_info
-}
-uninstall() {
-
-	if [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f $backup && -d /etc/v2ray/233boy/v2ray ]]; then
-		. $backup
-		if [[ $mark ]]; then
-			_load uninstall.sh
-		else
-			echo
-			echo -e " $yellow输入 ${cyan}v2ray uninstall${none} $yellow即可卸载${none}"
-			echo
+			i=$(($i+1))
+			if [ $TIME_TOTAL -lt 100 ];then
+				if [ $RES -ge 3000 ];then
+					break;
+				fi
+			fi	
 		fi
+	done
 
-	elif [[ -f /usr/bin/v2ray/v2ray && -f /etc/v2ray/config.json ]] && [[ -f /etc/v2ray/233blog_v2ray_backup.txt && -d /etc/v2ray/233boy/v2ray ]]; then
-		echo
-		echo -e " $yellow输入 ${cyan}v2ray uninstall${none} $yellow即可卸载${none}"
-		echo
-	else
-		echo -e "
-		$red 大胸弟...你貌似毛有安装 V2Ray ....卸载个鸡鸡哦...$none
-
-		备注...仅支持卸载使用我 (233v2.com) 提供的 V2Ray 一键安装脚本
-		" && exit 1
+	NODE_URL=$(cat $tmp_file1|sort -r -g -t " " -k 1|head -n 1|awk '{print $2}')
+	if [ -z "$NODE_URL" ];then
+		NODE_URL=$(cat $tmp_file2|sort -g -t " " -k 1|head -n 1|awk '{print $2}')
+		if [ -z "$NODE_URL" ];then
+			NODE_URL='http://download.bt.cn';
+		fi
+	fi
+	rm -f $tmp_file1
+	rm -f $tmp_file2
+	download_Url=$NODE_URL
+	echo "Download node: $download_Url";
+	echo '---------------------------------------------';
+}
+Remove_Package(){
+	local PackageNmae=$1
+	if [ "${PM}" == "yum" ];then
+		isPackage=$(rpm -q ${PackageNmae}|grep "not installed")
+		if [ -z "${isPackage}" ];then
+			yum remove ${PackageNmae} -y
+		fi 
+	elif [ "${PM}" == "apt-get" ];then
+		isPackage=$(dpkg -l|grep ${PackageNmae})
+		if [ "${PackageNmae}" ];then
+			apt-get remove ${PackageNmae} -y
+		fi
+	fi
+}
+Install_RPM_Pack(){
+	yumPath=/etc/yum.conf
+	Centos8Check=$(cat /etc/redhat-release | grep ' 8.' | grep -iE 'centos|Red Hat')
+	isExc=$(cat $yumPath|grep httpd)
+	if [ "$isExc" = "" ];then
+		echo "exclude=httpd nginx php mysql mairadb python-psutil python2-psutil" >> $yumPath
 	fi
 
+	yumBaseUrl=$(cat /etc/yum.repos.d/CentOS-Base.repo|grep baseurl=http|cut -d '=' -f 2|cut -d '$' -f 1|head -n 1)
+	[ "${yumBaseUrl}" ] && checkYumRepo=$(curl --connect-timeout 5 --head -s -o /dev/null -w %{http_code} ${yumBaseUrl})	
+	if [ "${checkYumRepo}" != "200" ];then
+		curl -Ss --connect-timeout 3 -m 60 http://download.bt.cn/install/yumRepo_select.sh|bash
+	fi
+	
+	#尝试同步时间(从bt.cn)
+	echo 'Synchronizing system time...'
+	getBtTime=$(curl -sS --connect-timeout 3 -m 60 http://www.bt.cn/api/index/get_time)
+	if [ "${getBtTime}" ];then	
+		date -s "$(date -d @$getBtTime +"%Y-%m-%d %H:%M:%S")"
+	fi
+
+	if [ -z "${Centos8Check}" ]; then
+		yum install ntp -y
+		rm -rf /etc/localtime
+		ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+		#尝试同步国际时间(从ntp服务器)
+		ntpdate 0.asia.pool.ntp.org
+		setenforce 0
+	fi
+
+	startTime=`date +%s`
+
+	sed -i 's/SELINUX=enforcing/SELINUX=disabled/' /etc/selinux/config
+	#yum remove -y python-requests python3-requests python-greenlet python3-greenlet
+	yumPacks="libcurl-devel wget tar gcc make zip unzip openssl openssl-devel gcc libxml2 libxml2-devel libxslt* zlib zlib-devel libjpeg-devel libpng-devel libwebp libwebp-devel freetype freetype-devel lsof pcre pcre-devel vixie-cron crontabs icu libicu-devel c-ares libffi-devel bzip2-devel ncurses-devel sqlite-devel readline-devel tk-devel gdbm-devel db4-devel libpcap-devel xz-devel"
+	yum install -y ${yumPacks}
+
+	for yumPack in ${yumPacks}
+	do
+		rpmPack=$(rpm -q ${yumPack})
+		packCheck=$(echo ${rpmPack}|grep not)
+		if [ "${packCheck}" ]; then
+			yum install ${yumPack} -y
+		fi
+	done
+	if [ -f "/usr/bin/dnf" ]; then
+		dnf install -y redhat-rpm-config
+	fi
+
+	ALI_OS=$(cat /etc/redhat-release |grep "Alibaba Cloud Linux release 3")
+	if [ -z "${ALI_OS}" ];then 
+		yum install epel-release -y
+	fi
+}
+Install_Deb_Pack(){
+	ln -sf bash /bin/sh
+	apt-get update -y
+	apt-get install ruby -y
+	apt-get install lsb-release -y
+	#apt-get install ntp ntpdate -y
+	#/etc/init.d/ntp stop
+	#update-rc.d ntp remove
+	#cat >>~/.profile<<EOF
+	#TZ='Asia/Shanghai'; export TZ
+	#EOF
+	#rm -rf /etc/localtime
+	#cp /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+	#echo 'Synchronizing system time...'
+	#ntpdate 0.asia.pool.ntp.org
+	#apt-get upgrade -y
+	debPacks="wget curl libcurl4-openssl-dev gcc make zip unzip tar openssl libssl-dev gcc libxml2 libxml2-dev zlib1g zlib1g-dev libjpeg-dev libpng-dev lsof libpcre3 libpcre3-dev cron net-tools swig build-essential libffi-dev libbz2-dev libncurses-dev libsqlite3-dev libreadline-dev tk-dev libgdbm-dev libdb-dev libdb++-dev libpcap-dev xz-utils git";
+	apt-get install -y $debPacks --force-yes
+
+	for debPack in ${debPacks}
+	do
+		packCheck=$(dpkg -l ${debPack})
+		if [ "$?" -ne "0" ] ;then
+			apt-get install -y debPack
+		fi
+	done
+
+	if [ ! -d '/etc/letsencrypt' ];then
+		mkdir -p /etc/letsencryp
+		mkdir -p /var/spool/cron
+		if [ ! -f '/var/spool/cron/crontabs/root' ];then
+			echo '' > /var/spool/cron/crontabs/root
+			chmod 600 /var/spool/cron/crontabs/root
+		fi	
+	fi
+}
+Install_Bt(){
+	panelPort="8888"
+	if [ -f ${setup_path}/server/panel/data/port.pl ];then
+		panelPort=$(cat ${setup_path}/server/panel/data/port.pl)
+	fi
+	mkdir -p ${setup_path}/server/panel/logs
+	mkdir -p ${setup_path}/server/panel/vhost/apache
+	mkdir -p ${setup_path}/server/panel/vhost/nginx
+	mkdir -p ${setup_path}/server/panel/vhost/rewrite
+	mkdir -p ${setup_path}/server/panel/install
+	mkdir -p /www/server
+	mkdir -p /www/wwwroot
+	mkdir -p /www/wwwlogs
+	mkdir -p /www/backup/database
+	mkdir -p /www/backup/site
+
+	if [ ! -f "/usr/bin/unzip" ]; then
+		if [ "${PM}" = "yum" ]; then
+			yum install unzip -y
+		elif [ "${PM}" = "apt-get" ]; then
+			apt-get install unzip -y
+		fi
+	fi
+
+	if [ -f "/etc/init.d/bt" ]; then
+		/etc/init.d/bt stop
+		sleep 1
+	fi
+
+	wget -O panel.zip ${download_Url}/install/src/panel6.zip -T 10
+	wget -O /etc/init.d/bt ${download_Url}/install/src/bt6.init -T 10
+	wget -O /www/server/panel/install/public.sh ${download_Url}/install/public.sh -T 10
+
+	if [ -f "${setup_path}/server/panel/data/default.db" ];then
+		if [ -d "/${setup_path}/server/panel/old_data" ];then
+			rm -rf ${setup_path}/server/panel/old_data
+		fi
+		mkdir -p ${setup_path}/server/panel/old_data
+		d_format=$(date +"%Y%m%d_%H%M%S")
+		\cp -arf ${setup_path}/server/panel/data/default.db ${setup_path}/server/panel/data/default_backup_${d_format}.db
+		mv -f ${setup_path}/server/panel/data/default.db ${setup_path}/server/panel/old_data/default.db
+		mv -f ${setup_path}/server/panel/data/system.db ${setup_path}/server/panel/old_data/system.db
+		mv -f ${setup_path}/server/panel/data/port.pl ${setup_path}/server/panel/old_data/port.pl
+		mv -f ${setup_path}/server/panel/data/admin_path.pl ${setup_path}/server/panel/old_data/admin_path.pl
+	fi
+
+	unzip -o panel.zip -d ${setup_path}/server/ > /dev/null
+
+	if [ -d "${setup_path}/server/panel/old_data" ];then
+		mv -f ${setup_path}/server/panel/old_data/default.db ${setup_path}/server/panel/data/default.db
+		mv -f ${setup_path}/server/panel/old_data/system.db ${setup_path}/server/panel/data/system.db
+		mv -f ${setup_path}/server/panel/old_data/port.pl ${setup_path}/server/panel/data/port.pl
+		mv -f ${setup_path}/server/panel/old_data/admin_path.pl ${setup_path}/server/panel/data/admin_path.pl
+		if [ -d "/${setup_path}/server/panel/old_data" ];then
+			rm -rf ${setup_path}/server/panel/old_data
+		fi
+	fi
+
+	rm -f panel.zip
+
+	if [ ! -f ${setup_path}/server/panel/tools.py ];then
+		Red_Error "ERROR: Failed to download, please try install again!"
+	fi
+
+	rm -f ${setup_path}/server/panel/class/*.pyc
+	rm -f ${setup_path}/server/panel/*.pyc
+
+	chmod +x /etc/init.d/bt
+	chmod -R 600 ${setup_path}/server/panel
+	chmod -R +x ${setup_path}/server/panel/script
+	ln -sf /etc/init.d/bt /usr/bin/bt
+	echo "${panelPort}" > ${setup_path}/server/panel/data/port.pl
+	wget -O /etc/init.d/bt ${download_Url}/install/src/bt7.init -T 10
+	wget -O /www/server/panel/init.sh ${download_Url}/install/src/bt7.init -T 10
+}
+Install_Python_Lib(){
+	curl -Ss --connect-timeout 3 -m 60 $download_Url/install/pip_select.sh|bash
+	pyenv_path="/www/server/panel"
+	if [ -f $pyenv_path/pyenv/bin/python ];then
+		is_err=$($pyenv_path/pyenv/bin/python3.7 -V 2>&1|grep 'Could not find platform')
+		if [ "$is_err" = "" ];then
+			chmod -R 700 $pyenv_path/pyenv/bin
+			is_package=$($python_bin -m psutil 2>&1|grep package)
+			if [ "$is_package" = "" ];then
+				wget -O $pyenv_path/pyenv/pip.txt $download_Url/install/pyenv/pip.txt -T 5
+				$pyenv_path/pyenv/bin/pip install -U pip
+				$pyenv_path/pyenv/bin/pip install -U setuptools
+				$pyenv_path/pyenv/bin/pip install -r $pyenv_path/pyenv/pip.txt
+			fi
+			source $pyenv_path/pyenv/bin/activate
+			return
+		else
+			rm -rf $pyenv_path/pyenv
+		fi
+	fi
+	py_version="3.7.8"
+	mkdir -p $pyenv_path
+	os_type='el'
+	os_version='7'
+	is_export_openssl=0
+	Get_Versions
+	Centos6_Openssl
+	Other_Openssl
+	echo "OS: $os_type - $os_version"
+	is_aarch64=$(uname -a|grep aarch64)
+	if [ "$is_aarch64" != "" ];then
+		os_version="aarch64"
+	fi
+	
+	if [ -f "/www/server/panel/pymake.pl" ];then
+		os_version=""
+		rm -f /www/server/panel/pymake.pl
+	fi	
+
+	if [ "${os_version}" != "" ];then
+		pyenv_file="/www/pyenv.tar.gz"
+		wget -O $pyenv_file $download_Url/install/pyenv/pyenv-${os_type}${os_version}-x${is64bit}.tar.gz -T 10
+		tmp_size=$(du -b $pyenv_file|awk '{print $1}')
+		if [ $tmp_size -lt 703460 ];then
+			rm -f $pyenv_file
+			echo "ERROR: Download python env fielded."
+		else
+			echo "Install python env..."
+			tar zxvf $pyenv_file -C $pyenv_path/ > /dev/null
+			chmod -R 700 $pyenv_path/pyenv/bin
+			if [ ! -f $pyenv_path/pyenv/bin/python ];then
+				rm -f $pyenv_file
+				Red_Error "ERROR: Install python env fielded."
+			fi
+			is_err=$($pyenv_path/pyenv/bin/python3.7 -V 2>&1|grep 'Could not find platform')
+			if [ "$is_err" = "" ];then
+				rm -f $pyenv_file
+				ln -sf $pyenv_path/pyenv/bin/pip3.7 /usr/bin/btpip
+				ln -sf $pyenv_path/pyenv/bin/python3.7 /usr/bin/btpython
+				source $pyenv_path/pyenv/bin/activate
+				return
+			else
+				rm -f $pyenv_file
+				rm -rf $pyenv_path/pyenv
+			fi
+		fi
+		
+	fi
+	if [ -f /usr/local/openssl/lib/libssl.so ];then
+		export LDFLAGS="-L/usr/local/openssl/lib"
+		export CPPFLAGS="-I/usr/local/openssl/include"
+		export PKG_CONFIG_PATH="/usr/local/openssl/lib/pkgconfig"
+		echo "export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/local/openssl/lib" >> /etc/profile
+		source /etc/profile
+	fi
+	cd /www
+	python_src='/www/python_src.tar.xz'
+	python_src_path="/www/Python-${py_version}"
+	wget -O $python_src $download_Url/src/Python-${py_version}.tar.xz -T 5
+	tmp_size=$(du -b $python_src|awk '{print $1}')
+	if [ $tmp_size -lt 10703460 ];then
+		rm -f $python_src
+		Red_Error "ERROR: Download python source code fielded."
+	fi
+	tar xvf $python_src
+	rm -f $python_src
+	cd $python_src_path
+	./configure --prefix=$pyenv_path/pyenv
+	make -j$cpu_cpunt
+	make install
+	if [ ! -f $pyenv_path/pyenv/bin/python3.7 ];then
+		rm -rf $python_src_path
+		Red_Error "ERROR: Make python env fielded."
+	fi
+	cd ~
+	rm -rf $python_src_path
+	wget -O $pyenv_path/pyenv/bin/activate $download_Url/install/pyenv/activate.panel -T 5
+	wget -O $pyenv_path/pyenv/pip.txt $download_Url/install/pyenv/pip-3.7.8.txt -T 5
+	ln -sf $pyenv_path/pyenv/bin/pip3.7 $pyenv_path/pyenv/bin/pip
+	ln -sf $pyenv_path/pyenv/bin/python3.7 $pyenv_path/pyenv/bin/python
+	ln -sf $pyenv_path/pyenv/bin/pip3.7 /usr/bin/btpip
+	ln -sf $pyenv_path/pyenv/bin/python3.7 /usr/bin/btpython
+	chmod -R 700 $pyenv_path/pyenv/bin
+	$pyenv_path/pyenv/bin/pip install -U pip
+	$pyenv_path/pyenv/bin/pip install -U setuptools
+	$pyenv_path/pyenv/bin/pip install -U wheel==0.34.2 
+	$pyenv_path/pyenv/bin/pip install -r $pyenv_path/pyenv/pip.txt
+	source $pyenv_path/pyenv/bin/activate
+}
+Other_Openssl(){
+	openssl_version=$(openssl version|grep -Eo '[0-9]\.[0-9]\.[0-9]')
+	if [ "$openssl_version" = '1.0.1' ] || [ "$openssl_version" = '1.0.0' ];then	
+		opensslVersion="1.0.2r"
+		if [ ! -f "/usr/local/openssl/lib/libssl.so" ];then
+			cd /www
+			openssl_src_file=/www/openssl.tar.gz
+			wget -O $openssl_src_file ${download_Url}/src/openssl-${opensslVersion}.tar.gz
+			tmp_size=$(du -b $openssl_src_file|awk '{print $1}')
+			if [ $tmp_size -lt 703460 ];then
+				rm -f $openssl_src_file
+				Red_Error "ERROR: Download openssl-1.0.2 source code fielded."
+			fi
+			tar -zxf $openssl_src_file
+			rm -f $openssl_src_file
+			cd openssl-${opensslVersion}
+			#zlib-dynamic shared
+			./config --openssldir=/usr/local/openssl zlib-dynamic shared
+			make -j${cpuCore} 
+			make install
+			echo  "/usr/local/openssl/lib" > /etc/ld.so.conf.d/zopenssl.conf
+			ldconfig
+			cd ..
+			rm -rf openssl-${opensslVersion}
+			is_export_openssl=1
+			cd ~
+		fi
+	fi
+}
+Insatll_Libressl(){
+	openssl_version=$(openssl version|grep -Eo '[0-9]\.[0-9]\.[0-9]')
+	if [ "$openssl_version" = '1.0.1' ] || [ "$openssl_version" = '1.0.0' ];then	
+		opensslVersion="3.0.2"
+		cd /www
+		openssl_src_file=/www/openssl.tar.gz
+		wget -O $openssl_src_file ${download_Url}/install/pyenv/libressl-${opensslVersion}.tar.gz
+		tmp_size=$(du -b $openssl_src_file|awk '{print $1}')
+		if [ $tmp_size -lt 703460 ];then
+			rm -f $openssl_src_file
+			Red_Error "ERROR: Download libressl-$opensslVersion source code fielded."
+		fi
+		tar -zxf $openssl_src_file
+		rm -f $openssl_src_file
+		cd libressl-${opensslVersion}
+		./config –prefix=/usr/local/lib
+		make -j${cpuCore}
+		make install
+		ldconfig
+		ldconfig -v
+		cd ..
+		rm -rf libressl-${opensslVersion}
+		is_export_openssl=1
+		cd ~
+	fi
+}
+Centos6_Openssl(){
+	if [ "$os_type" != 'el' ];then
+		return
+	fi
+	if [ "$os_version" != '6' ];then
+		return
+	fi
+	echo 'Centos6 install openssl-1.0.2...'
+	openssl_rpm_file="/www/openssl.rpm"
+	wget -O $openssl_rpm_file $download_Url/rpm/centos6/${is64bit}/bt-openssl102.rpm -T 10
+	tmp_size=$(du -b $openssl_rpm_file|awk '{print $1}')
+	if [ $tmp_size -lt 102400 ];then
+		rm -f $openssl_rpm_file
+		Red_Error "ERROR: Download python env fielded."
+	fi
+	rpm -ivh $openssl_rpm_file
+	rm -f $openssl_rpm_file
+	is_export_openssl=1
+}
+Get_Versions(){
+	redhat_version_file="/etc/redhat-release"
+	deb_version_file="/etc/issue"
+	if [ -f $redhat_version_file ];then
+		os_type='el'
+		is_aliyunos=$(cat $redhat_version_file|grep Aliyun)
+		if [ "$is_aliyunos" != "" ];then
+			return
+		fi
+		os_version=$(cat $redhat_version_file|grep CentOS|grep -Eo '([0-9]+\.)+[0-9]+'|grep -Eo '^[0-9]')
+		if [ "${os_version}" = "5" ];then
+			os_version=""
+		fi
+	else
+		os_type='ubuntu'
+		os_version=$(cat $deb_version_file|grep Ubuntu|grep -Eo '([0-9]+\.)+[0-9]+'|grep -Eo '^[0-9]+')
+		if [ "${os_version}" = "" ];then
+			os_type='debian'
+			os_version=$(cat $deb_version_file|grep Debian|grep -Eo '([0-9]+\.)+[0-9]+'|grep -Eo '[0-9]+')
+			if [ "${os_version}" = "" ];then
+				os_version=$(cat $deb_version_file|grep Debian|grep -Eo '[0-9]+')
+			fi
+			if [ "${os_version}" = "8" ];then
+				os_version=""
+			fi
+			if [ "${is64bit}" = '32' ];then
+				os_version=""
+			fi
+		else
+			if [ "$os_version" = "14" ];then
+				os_version=""
+			fi
+			if [ "$os_version" = "12" ];then
+				os_version=""
+			fi
+			if [ "$os_version" = "19" ];then
+				os_version=""
+			fi
+
+		fi
+	fi
+}
+Set_Bt_Panel(){
+	password=$(cat /dev/urandom | head -n 16 | md5sum | head -c 8)
+	sleep 1
+	admin_auth="/www/server/panel/data/admin_path.pl"
+	if [ ! -f ${admin_auth} ];then
+		auth_path=$(cat /dev/urandom | head -n 16 | md5sum | head -c 8)
+		echo "/${auth_path}" > ${admin_auth}
+	fi
+	auth_path=$(cat ${admin_auth})
+	cd ${setup_path}/server/panel/
+	/etc/init.d/bt start
+	$python_bin -m py_compile tools.py
+	$python_bin tools.py username
+	username=$($python_bin tools.py panel ${password})
+	cd ~
+	echo "${password}" > ${setup_path}/server/panel/default.pl
+	chmod 600 ${setup_path}/server/panel/default.pl
+	sleep 3
+	/etc/init.d/bt restart 	
+	sleep 3
+	isStart=$(ps aux |grep 'BT-Panel'|grep -v grep|awk '{print $2}')
+	LOCAL_CURL=$(curl 127.0.0.1:8888/login 2>&1 |grep -i html)
+	if [ -z "${isStart}" ] && [ -z "${LOCAL_CURL}" ];then
+		/etc/init.d/bt 22
+		cd /www/server/panel/pyenv/bin
+		touch t.pl
+		ls -al python3.7 python
+		lsattr python3.7 python
+		Red_Error "ERROR: The BT-Panel service startup failed."
+	fi
+}
+Set_Firewall(){
+	sshPort=$(cat /etc/ssh/sshd_config | grep 'Port '|awk '{print $2}')
+	if [ "${PM}" = "apt-get" ]; then
+		apt-get install -y ufw
+		if [ -f "/usr/sbin/ufw" ];then
+			ufw allow 20/tcp
+			ufw allow 21/tcp
+			ufw allow 22/tcp
+			ufw allow 80/tcp
+			ufw allow 888/tcp
+			ufw allow ${panelPort}/tcp
+			ufw allow ${sshPort}/tcp
+			ufw allow 39000:40000/tcp
+			ufw_status=`ufw status`
+			echo y|ufw enable
+			ufw default deny
+			ufw reload
+		fi
+	else
+		if [ -f "/etc/init.d/iptables" ];then
+			iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 20 -j ACCEPT
+			iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 21 -j ACCEPT
+			iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 22 -j ACCEPT
+			iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 80 -j ACCEPT
+			iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport ${panelPort} -j ACCEPT
+			iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport ${sshPort} -j ACCEPT
+			iptables -I INPUT -p tcp -m state --state NEW -m tcp --dport 39000:40000 -j ACCEPT
+			#iptables -I INPUT -p tcp -m state --state NEW -m udp --dport 39000:40000 -j ACCEPT
+			iptables -A INPUT -p icmp --icmp-type any -j ACCEPT
+			iptables -A INPUT -s localhost -d localhost -j ACCEPT
+			iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+			iptables -P INPUT DROP
+			service iptables save
+			sed -i "s#IPTABLES_MODULES=\"\"#IPTABLES_MODULES=\"ip_conntrack_netbios_ns ip_conntrack_ftp ip_nat_ftp\"#" /etc/sysconfig/iptables-config
+			iptables_status=$(service iptables status | grep 'not running')
+			if [ "${iptables_status}" == '' ];then
+				service iptables restart
+			fi
+		else
+			AliyunCheck=$(cat /etc/redhat-release|grep "Aliyun Linux")
+			[ "${AliyunCheck}" ] && return
+			yum install firewalld -y
+			[ "${Centos8Check}" ] && yum reinstall python3-six -y
+			systemctl enable firewalld
+			systemctl start firewalld
+			firewall-cmd --set-default-zone=public > /dev/null 2>&1
+			firewall-cmd --permanent --zone=public --add-port=20/tcp > /dev/null 2>&1
+			firewall-cmd --permanent --zone=public --add-port=21/tcp > /dev/null 2>&1
+			firewall-cmd --permanent --zone=public --add-port=22/tcp > /dev/null 2>&1
+			firewall-cmd --permanent --zone=public --add-port=80/tcp > /dev/null 2>&1
+			firewall-cmd --permanent --zone=public --add-port=${panelPort}/tcp > /dev/null 2>&1
+			firewall-cmd --permanent --zone=public --add-port=${sshPort}/tcp > /dev/null 2>&1
+			firewall-cmd --permanent --zone=public --add-port=39000-40000/tcp > /dev/null 2>&1
+			#firewall-cmd --permanent --zone=public --add-port=39000-40000/udp > /dev/null 2>&1
+			firewall-cmd --reload
+		fi
+	fi
+}
+Get_Ip_Address(){
+	getIpAddress=""
+	getIpAddress=$(curl -sS --connect-timeout 10 -m 60 https://www.bt.cn/Api/getIpAddress)
+	if [ -z "${getIpAddress}" ] || [ "${getIpAddress}" = "0.0.0.0" ]; then
+		isHosts=$(cat /etc/hosts|grep 'www.bt.cn')
+		if [ -z "${isHosts}" ];then
+			echo "" >> /etc/hosts
+			echo "103.224.251.67 www.bt.cn" >> /etc/hosts
+			getIpAddress=$(curl -sS --connect-timeout 10 -m 60 https://www.bt.cn/Api/getIpAddress)
+			if [ -z "${getIpAddress}" ];then
+				sed -i "/bt.cn/d" /etc/hosts
+			fi
+		fi
+	fi
+
+	ipv4Check=$($python_bin -c "import re; print(re.match('^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$','${getIpAddress}'))")
+	if [ "${ipv4Check}" == "None" ];then
+		ipv6Address=$(echo ${getIpAddress}|tr -d "[]")
+		ipv6Check=$($python_bin -c "import re; print(re.match('^([0-9a-fA-F]{0,4}:){1,7}[0-9a-fA-F]{0,4}$','${ipv6Address}'))")
+		if [ "${ipv6Check}" == "None" ]; then
+			getIpAddress="SERVER_IP"
+		else
+			echo "True" > ${setup_path}/server/panel/data/ipv6.pl
+			sleep 1
+			/etc/init.d/bt restart
+		fi
+	fi
+
+	if [ "${getIpAddress}" != "SERVER_IP" ];then
+		echo "${getIpAddress}" > ${setup_path}/server/panel/data/iplist.txt
+	fi
+	LOCAL_IP=$(ip addr | grep -E -o '[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}' | grep -E -v "^127\.|^255\.|^0\." | head -n 1)
+}
+Setup_Count(){
+	curl -sS --connect-timeout 10 -m 60 https://www.bt.cn/Api/SetupCount?type=Linux\&o=$1 > /dev/null 2>&1
+	if [ "$1" != "" ];then
+		echo $1 > /www/server/panel/data/o.pl
+		cd /www/server/panel
+		$python_bin tools.py o
+	fi
+	echo /www > /var/bt_setupPath.conf
+}
+Install_Main(){
+	startTime=`date +%s`
+	Lock_Clear
+	System_Check
+	Get_Pack_Manager
+	get_node_url
+
+	MEM_TOTAL=$(free -g|grep Mem|awk '{print $2}')
+	if [ "${MEM_TOTAL}" -le "1" ];then
+		Auto_Swap
+	fi
+	
+	if [ "${PM}" = "yum" ]; then
+		Install_RPM_Pack
+	elif [ "${PM}" = "apt-get" ]; then
+		Install_Deb_Pack
+	fi
+
+	Install_Python_Lib
+	Install_Bt
+	
+
+	Set_Bt_Panel
+	Service_Add
+	Set_Firewall
+
+	Get_Ip_Address
+	Setup_Count ${IDC_CODE}
 }
 
-args=$1
-_gitbranch=$2
-[ -z $1 ] && args="online"
-case $args in
-online)
-	#hello world
-	[[ -z $_gitbranch ]] && _gitbranch="master"
-	;;
-local)
-	local_install=true
-	;;
-*)
-	echo
-	echo -e " 你输入的这个参数 <$red $args $none> ...这个是什么鬼啊...脚本不认识它哇"
-	echo
-	echo -e " 这个辣鸡脚本仅支持输入$green local / online $none参数"
-	echo
-	echo -e " 输入$yellow local $none即是使用本地安装"
-	echo
-	echo -e " 输入$yellow online $none即是使用在线安装 (默认)"
-	echo
-	exit 1
-	;;
-esac
-
-clear
-while :; do
-	echo
-	echo "........... V2Ray 一键安装脚本 & 管理脚本 by 233v2.com .........."
-	echo
-	echo "帮助说明: https://233v2.com/post/1/"
-	echo
-	echo "搭建教程: https://233v2.com/post/2/"
-	echo
-	echo " 1. 安装"
-	echo
-	echo " 2. 卸载"
-	echo
-	if [[ $local_install ]]; then
-		echo -e "$yellow 温馨提示.. 本地安装已启用 ..$none"
-		echo
-	fi
-	read -p "$(echo -e "请选择 [${magenta}1-2$none]:")" choose
-	case $choose in
-	1)
-		install
-		break
-		;;
-	2)
-		uninstall
-		break
-		;;
-	*)
-		error
-		;;
-	esac
+echo "
++----------------------------------------------------------------------
+| Bt-WebPanel FOR CentOS/Ubuntu/Debian
++----------------------------------------------------------------------
+| Copyright © 2015-2099 BT-SOFT(http://www.bt.cn) All rights reserved.
++----------------------------------------------------------------------
+| The WebPanel URL will be http://SERVER_IP:8888 when installed.
++----------------------------------------------------------------------
+"
+while [ "$go" != 'y' ] && [ "$go" != 'n' ]
+do
+	read -p "Do you want to install Bt-Panel to the $setup_path directory now?(y/n): " go;
 done
+
+if [ "$go" == 'n' ];then
+	exit;
+fi
+
+Install_Main
+echo > /www/server/panel/data/bind.pl
+echo -e "=================================================================="
+echo -e "\033[32mCongratulations! Installed successfully!\033[0m"
+echo -e "=================================================================="
+echo  "外网面板地址: http://${getIpAddress}:${panelPort}${auth_path}"
+echo  "内网面板地址: http://${LOCAL_IP}:${panelPort}${auth_path}"
+echo -e "username: $username"
+echo -e "password: $password"
+echo -e "\033[33mIf you cannot access the panel,\033[0m"
+echo -e "\033[33mrelease the following panel port [${panelPort}] in the security group\033[0m"
+echo -e "\033[33m若无法访问面板，请检查防火墙/安全组是否有放行面板[${panelPort}]端口\033[0m"
+echo -e "=================================================================="
+
+endTime=`date +%s`
+((outTime=($endTime-$startTime)/60))
+echo -e "Time consumed:\033[32m $outTime \033[0mMinute!"
+

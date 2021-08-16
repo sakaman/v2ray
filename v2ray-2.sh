@@ -822,7 +822,7 @@ installV2ray() {
     cat >$SERVICE_FILE<<-EOF
 [Unit]
 Description=V2ray Service
-Documentation=https://hijk.art
+Documentation=https://www.v2fly.org
 After=network.target nss-lookup.target
 
 [Service]
